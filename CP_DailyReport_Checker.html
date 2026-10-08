@@ -40,6 +40,9 @@ tr:hover td{background:var(--bg)}
 .drop{border:2px dashed var(--bd);border-radius:10px;padding:12px;text-align:center;color:var(--mut);margin-bottom:12px;cursor:pointer;background:var(--card)}
 .drop.over,body.dragging .drop{border-color:var(--pri);color:var(--pri);background:var(--bg)}
 body.dragging::after{content:'放開滑鼠以匯入日報表';position:fixed;inset:0;background:rgba(36,87,197,.18);display:flex;align-items:center;justify-content:center;font-size:28px;font-weight:700;color:var(--pri);z-index:9;pointer-events:none}
+.ok{background:#e3f6e8;color:#1b7a3a}@media(prefers-color-scheme:dark){.ok{background:#173323;color:#6fd68f}}
+.card{background:var(--card);border:1px solid var(--bd);border-radius:10px;padding:12px 14px;margin-bottom:12px}
+.card h3{margin:0 0 8px;font-size:15px}.row{display:flex;flex-wrap:wrap;gap:18px;margin:6px 0}.row>div{min-width:240px}
 .note{color:var(--mut);font-size:12px;margin-top:8px}
 </style>
 </head>
@@ -50,7 +53,7 @@ body.dragging::after{content:'放開滑鼠以匯入日報表';position:fixed;ins
 </header>
 <main>
   <div class="drop" id="drop">📥 將 CP 日報表 (.xls / .xlsx) 拖曳到此處匯入，或點擊選擇檔案</div>
-  <div class="tabs"><div class="tab on" data-t="a">① 測項 Failure Rate</div><div class="tab" data-t="b">② Initial − Final Yield</div></div>
+  <div class="tabs"><div class="tab on" data-t="a">① 測項 Failure Rate</div><div class="tab" data-t="b">② Initial − Final Yield</div><div class="tab" data-t="c">③ 批號查詢</div></div>
 
   <section id="pa">
     <div class="bar">
@@ -79,6 +82,13 @@ body.dragging::after{content:'放開滑鼠以匯入日報表';position:fixed;ins
     <div class="cnt" id="cntb"></div>
     <div class="wrap"><table id="tb"></table></div>
     <div class="note">差值 = Initial CP yield (%) − Final yield [With AOI] (%)。Final 為 0 或差值 &gt; 標註門檻時，標註「Mosel來料尚未補齊25pcs wafer」。</div>
+  </section>
+  <section id="pc" hidden>
+    <div class="bar">
+      <label>批號 Lot Num <input type="search" id="qc" placeholder="輸入完整批號，例如 RK32405" style="width:240px"></label>
+    </div>
+    <div id="rc"></div>
+    <div class="note">於已匯入的 DailyReport 區間內查詢。判斷門檻沿用 ①、② 頁工具列目前的設定（Failure rate 紅/橙/黃、AEC-Q、Initial−Final）。</div>
   </section>
 </main>
 
@@ -128,6 +138,8 @@ function parse(buf,name){
     rows.push({dt:(fd(x[c.date])+" "+ft(x[c.time])).trim(),st:x[c.st]??"",a:x[c.a]??"",m:x[c.m]??"",lot:String(x[c.lot]),tin:num(x[c.tin]),
       ini:num(x[c.ini]),fin:num(x[c.fin]),f:tests.map(t=>num(x[t.i])||0)})}
   D={name,tests:tests.map(t=>t.n),rows};
+  const ds0=rows.map(r=>r.dt.slice(0,10).replace(/-/g,"")).filter(Boolean).sort();
+  D.range=ds0.length?`${ds0[0]}~${ds0[ds0.length-1]}`:"";
   const ds=rows.map(r=>r.dt.slice(0,10)).filter(Boolean).sort();
   $("meta").textContent=`${name}　|　${rows.length} 筆　|　${ds[0]||""} ~ ${ds[ds.length-1]||""}`;
   fltTest=null;render();
@@ -181,10 +193,28 @@ function renderEmpty(){
   $("meta").textContent="尚未匯入日報表";
   $("suma").innerHTML="";$("cnta").textContent="";$("cntb").textContent="";
   const e='<tr><td class="empty">尚未匯入日報表，請拖曳檔案或按「匯入日報表」</td></tr>';
-  $("ta").innerHTML=e;$("tb").innerHTML=e;
+  $("ta").innerHTML=e;$("tb").innerHTML=e;renderC();
 }
-function render(){if(!D)return renderEmpty();renderA();renderB()}
-$("clr").onclick=()=>{$("qa").value="";$("qb").value="";$("file").value="";renderEmpty()};
+function renderC(){
+  const box=$("rc"),q=$("qc").value.trim();renderC.out=[];
+  if(!D){box.innerHTML='<div class="card empty">請先匯入特定區間的 DailyReport 後再查詢</div>';return}
+  if(!q){box.innerHTML=`<div class="card empty">已匯入區間 ${D.range}，請輸入批號查詢</div>`;return}
+  const rs=D.rows.filter(r=>r.lot.toLowerCase()===q.toLowerCase());
+  if(!rs.length){box.innerHTML=`<div class="card empty"><b>${D.range} 查無此批號</b></div>`;return}
+  const ai=D.tests.findIndex(t=>/^aec-q/i.test(t)),y1=+$("y1").value,y2=+$("y2").value,t4=+$("t4").value;
+  box.innerHTML=`<div class="cnt">${D.range} 區間內，批號 <b>${esc(rs[0].lot)}</b> 共 ${rs.length} 筆紀錄</div>`+rs.map(r=>{
+    const all=D.tests.map((n,i)=>{const rate=r.tin?r.f[i]/r.tin*100:0;return{n,cnt:r.f[i],rate,lv:lvOf(rate)}});
+    const hits=all.filter(h=>h.lv>0).sort((x,y)=>y.rate-x.rate),top=hits[0];
+    const aec=ai>=0&&r.tin?r.f[ai]/r.tin*100:0,aw=aec>t4;
+    const diff=r.ini!=null&&r.fin!=null?r.ini-r.fin:null,yh=diff!=null&&diff>y1,yw=diff!=null&&(r.fin===0||diff>y2)&&yh;
+    renderC.out.push([r.dt,r.a,r.m,r.lot,r.tin,hits.length?"是":"否",top?+top.rate.toFixed(2):0,hits.map(h=>`${h.n} ${h.cnt}/${fmt(h.rate)}%`).join("; "),aw?"Mosel來料未齊":"",r.ini,r.fin,diff==null?"":+diff.toFixed(2),diff==null?"":(yh?"是":"否"),yw?"Mosel來料尚未補齊25pcs wafer":""]);
+    return `<div class="card"><h3>${esc(r.dt)}　${esc(r.a)} / ${esc(r.m)}　Total in ${r.tin??"-"}</h3><div class="row">
+      <div><b>測項 Failure Rate 超標？</b><br>${hits.length?`<span class="tag l${top.lv}">有，最高 ${esc(top.n)} ${fmt(top.rate)}%</span>`:'<span class="tag ok">無（皆 ≤ '+$("t1").value+'%）</span>'}${aw?`<br><span class="wm">Mosel來料未齊 (AEC-Q ${fmt(aec)}%)</span>`:""}</div>
+      <div><b>Initial − Final &gt; ${y1}%？</b><br>${diff==null?"無 yield 資料":(yh?`<span class="tag l3">是，差值 ${fmt(diff)}%</span>`:`<span class="tag ok">否，差值 ${fmt(diff)}%</span>`)}　<small>(Initial ${fmt(r.ini)} / Final ${fmt(r.fin)})</small>${yw?'<br><span class="wm">Mosel來料尚未補齊25pcs wafer</span>':""}</div></div>
+      ${hits.length?`<div class="wrap" style="max-height:none"><table><thead><tr><th>超標測項</th><th class="n">Failure count</th><th class="n">Failure rate</th><th>等級</th></tr></thead><tbody>`+hits.map(h=>`<tr><td>${esc(h.n)}</td><td class="n">${h.cnt}</td><td class="n">${fmt(h.rate)}%</td><td><span class="tag l${h.lv}">${["","黃 >"+$("t1").value,"橙 >"+$("t2").value,"紅 >"+$("t3").value][h.lv]}%</span></td></tr>`).join("")+"</tbody></table></div>":""}</div>`}).join("");
+}
+function render(){if(!D)return renderEmpty();renderA();renderB();renderC()}
+$("clr").onclick=()=>{$("qa").value="";$("qb").value="";$("qc").value="";$("file").value="";renderEmpty()};
 
 function csv(rows,cols,name){
   const s="\ufeff"+[cols.map(c=>c[0]),...rows.map(r=>cols.map(c=>`"${String(c[1](r)).replace(/"/g,'""')}"`))].map(r=>r.join(",")).join("\n");
@@ -193,8 +223,8 @@ function csv(rows,cols,name){
 $("expa").onclick=()=>csv(renderA.rows||[],[["測試時間",r=>r.dt],["Type(A)",r=>r.a],["Type(mV)",r=>r.m],["Lot Num",r=>r.lot],["Total in",r=>r.tin],["超標測項",r=>r.hits.map(h=>`${h.t} ${h.cnt}/${fmt(h.rate)}%`).join("; ")],["備註",r=>r.wm?"Mosel來料未齊":""]],"failure_rate_check.csv");
 $("expb").onclick=()=>csv(renderB.rows||[],[["測試時間",r=>r.dt],["Type(A)",r=>r.a],["Type(mV)",r=>r.m],["Lot Num",r=>r.lot],["Initial",r=>r.ini],["Final",r=>r.fin],["差值",r=>fmt(r.diff)],["備註",r=>r.wm?"Mosel來料尚未補齊25pcs wafer":""]],"yield_diff_check.csv");
 
-document.querySelectorAll(".tab").forEach(t=>t.onclick=()=>{document.querySelectorAll(".tab").forEach(x=>x.classList.toggle("on",x===t));$("pa").hidden=t.dataset.t!=="a";$("pb").hidden=t.dataset.t!=="b"});
-["t3","t2","t1","t4","minlv","qa","y1","y2","qb"].forEach(id=>$(id).addEventListener("input",render));
+document.querySelectorAll(".tab").forEach(t=>t.onclick=()=>{document.querySelectorAll(".tab").forEach(x=>x.classList.toggle("on",x===t));["a","b","c"].forEach(k=>$("p"+k).hidden=t.dataset.t!==k)});
+["t3","t2","t1","t4","minlv","qa","y1","y2","qb","qc"].forEach(id=>$(id).addEventListener("input",render));
 $("suma").onclick=e=>{const c=e.target.closest(".chip");if(c){fltTest=c.dataset.test||null;renderA()}};
 document.addEventListener("click",e=>{const th=e.target.closest("th[data-k]");if(!th)return;const s=th.dataset.t==="a"?sortA:sortB;
   if(th.dataset.k==="hits")return;if(s.k===th.dataset.k)s.d*=-1;else{s.k=th.dataset.k;s.d=-1}render()});
@@ -219,6 +249,7 @@ $("xl").onclick=()=>{
     ...A.map(r=>[r.dt,r.st,r.a,r.m,r.lot,r.tin,+r.max.toFixed(2),["","黃","橙","紅"][r.lv],r.hits.map(h=>`${h.t} ${h.cnt}/${fmt(h.rate)}%`).join("; "),r.wm?"Mosel來料未齊":""])],[20,16,9,10,11,9,8,6,70,16]);
   add("Yield差值檢查",[["測試時間","Station","Type(A)","Type(mV)","Lot Num","Initial CP yield (%)","Final yield [With AOI] (%)","差值 (%)","備註"],
     ...B.map(r=>[r.dt,r.st,r.a,r.m,r.lot,r.ini,r.fin,+r.diff.toFixed(2),r.wm?"Mosel來料尚未補齊25pcs wafer":""])],[20,16,9,10,11,18,24,10,32]);
+  if((renderC.out||[]).length)add("批號查詢",[["測試時間","Type(A)","Type(mV)","Lot Num","Total in","Failure rate超標","最高 %","超標測項 (count / rate)","AEC-Q 備註","Initial CP yield (%)","Final yield [With AOI] (%)","差值 (%)","差值超標","備註"],...renderC.out],[20,9,10,11,9,14,8,60,16,18,24,10,10,32]);
   const d=new Date(),p=n=>String(n).padStart(2,"0");
   XLSX.writeFile(wb,`CP_DailyReport_check_${d.getFullYear()}${p(d.getMonth()+1)}${p(d.getDate())}.xlsx`);
 };
