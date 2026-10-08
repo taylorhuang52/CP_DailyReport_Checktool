@@ -122,9 +122,10 @@ function parse(buf,name){
   const tests=[];for(let i=c.c0;i<c.tin;i++)if(H[i])tests.push({i,n:String(g[hr][i]).replace(/\s+/g,"")});
   const num=v=>(v===null||v===""||isNaN(Number(v)))?null:Number(v);
   const fd=v=>{if(typeof v==="number"){const p=XLSX.SSF.parse_date_code(v);return p?`${p.y}-${String(p.m).padStart(2,"0")}-${String(p.d).padStart(2,"0")}`:v}return v==null?"":String(v).slice(0,10)};
+  const ft=v=>{if(v==null||v==="")return"";if(typeof v==="number"){const s=Math.round((v%1)*86400)%86400,p=n=>String(n).padStart(2,"0");return `${p(Math.floor(s/3600))}:${p(Math.floor(s%3600/60))}:${p(s%60)}`}return String(v).trim()};
   const rows=[];
   for(let r=hr+1;r<g.length;r++){const x=g[r];if(!x||x[c.lot]==null||x[c.lot]==="")continue;
-    rows.push({dt:fd(x[c.date])+" "+(x[c.time]??""),st:x[c.st]??"",a:x[c.a]??"",m:x[c.m]??"",lot:String(x[c.lot]),tin:num(x[c.tin]),
+    rows.push({dt:(fd(x[c.date])+" "+ft(x[c.time])).trim(),st:x[c.st]??"",a:x[c.a]??"",m:x[c.m]??"",lot:String(x[c.lot]),tin:num(x[c.tin]),
       ini:num(x[c.ini]),fin:num(x[c.fin]),f:tests.map(t=>num(x[t.i])||0)})}
   D={name,tests:tests.map(t=>t.n),rows};
   const ds=rows.map(r=>r.dt.slice(0,10)).filter(Boolean).sort();
